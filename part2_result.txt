@@ -4,7 +4,7 @@
 (1 row)
 
 
-Tue 20 Feb 2024 01:46:09 PM +08
+Tue 20 Feb 2024 04:11:34 PM +08
 
 pgbench (16.1)
 transaction type: <builtin: TPC-B (sort of)>
@@ -14,11 +14,16 @@ number of clients: 10
 number of threads: 10
 maximum number of tries: 1
 duration: 360 s
-number of transactions actually processed: 430557
+number of transactions actually processed: 156554
 number of failed transactions: 0 (0.000%)
-latency average = 21.840 ms
-initial connection time = 3.411 ms
-tps = 457.878518 (without initial connection time)
+latency average = 4.198 ms
+initial connection time = 6.156 ms
+tps = 2381.868249 (without initial connection time)
 
-Tue 20 Feb 2024 02:01:49 PM +08
+Tue 20 Feb 2024 04:12:40 PM +08
+
+ heap_read | heap_hit |       hit_ratio        
+-----------+----------+------------------------
+     11035 |  2429493 | 0.99547843745287904912
+(1 row)
 

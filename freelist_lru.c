@@ -25,6 +25,10 @@
 #define END_OF_STACK (-1)
 #define NOT_LINKED (-3)	
 
+/*
+ * A single buffer node structure, unit that forms doubly-'linked' list of buffers.
+ */
+
 typedef struct BufferNode
 {
 	int node_id;
@@ -33,6 +37,7 @@ typedef struct BufferNode
 
 } BufferNode;
 
+// A stack of buffer nodes, traces the buffer node addresses.
 static BufferNode *lruStack = NULL;
 
 /*
@@ -53,8 +58,9 @@ typedef struct
 	int			firstFreeBuffer;	/* Head of list of unused buffers */
 	int			lastFreeBuffer; /* Tail of list of unused buffers */
 	
-	BufferNode *stackHead;
-	BufferNode *stackTail;
+	// Pointer to the top and bottom nodes of the BufferNode stack.
+	BufferNode *stackTop;
+	BufferNode *stackBottom;
 
 	/*
 	 * NOTE: lastFreeBuffer is undefined when firstFreeBuffer is -1 (that is,
@@ -206,101 +212,104 @@ void
 StrategyAccessBuffer(int buf_id, bool delete)
 {
 
-	if (buf_id < 0 || buf_id > NBuffers)
+	if (buf_id < 0 || buf_id > NBuffers) // check the range of buf_id
 	{
 		elog(ERROR, "Invalid buffer index");
 		return;
 	}
 	
-	BufferNode *curr = &lruStack[buf_id];
+	BufferNode *curr = &lruStack[buf_id]; // focus on the node with node_id = buf_id
 	
-	if (delete) 
+	if (delete) // case 4: remove buffer(returned to freelist) from stack
     	{
     	
-    		if (curr->prev == NOT_LINKED && curr->next == NOT_LINKED)
+		// not in stack
+    		if (curr->prev == NOT_LINKED && curr->next == NOT_LINKED) 
 		{
 			return;
 			
 		}
-    		else if (curr->prev == END_OF_STACK && curr->next == END_OF_STACK)
+		// only node in stack, stack is empty after this
+    		else if (curr->prev == END_OF_STACK && curr->next == END_OF_STACK) 
     		{
-    			StrategyControl->stackHead = NULL;
-    			StrategyControl->stackTail = NULL;
+    			StrategyControl->stackTop = NULL;
+    			StrategyControl->stackBottom = NULL;
     		}
-    	
+		// node at top    	
         	else if (curr->prev == END_OF_STACK) 
         	{
-            		StrategyControl->stackHead = &lruStack[curr->next];
             		BufferNode *next_node = &lruStack[curr->next];
             		next_node->prev = curr->prev;
+            		StrategyControl->stackTop = &lruStack[curr->next];
             		
         	} 
-            
+            	// node at bottom
         	else if (curr->next == END_OF_STACK) 
-        	{
-            		StrategyControl->stackTail = &lruStack[curr->prev];	
+        	{	
             		BufferNode *prev_node = &lruStack[curr->prev];
             		prev_node->next = curr->next;
+            		StrategyControl->stackBottom = &lruStack[curr->prev];
         	}
-        	
+        	// node in the middle
         	else
         	{
         		BufferNode *next_node = &lruStack[curr->next];
+        		next_node->prev = curr->prev;
         		BufferNode *prev_node = &lruStack[curr->prev];
         		prev_node->next = curr->next;
-        		next_node->prev = curr->prev;
+        		
+        		
         	}
-        	
-        		curr->prev = NOT_LINKED;
-        		curr->next = NOT_LINKED;
+        	// remove links on node
+		curr->prev = NOT_LINKED;
+		curr->next = NOT_LINKED;
         	
         
 	} else 
 	{
-	
+		// c2: node not in stack, insert node at top
 		if (curr->prev == NOT_LINKED && curr->next == NOT_LINKED) 
-		{
-		
-			if (StrategyControl->stackHead == NULL && StrategyControl->stackTail == NULL)
+		{	
+			// stack is empty, node is also bottom
+			if (StrategyControl->stackTop == NULL && StrategyControl->stackBottom == NULL)
 			{
-				StrategyControl->stackHead = curr;
-				StrategyControl->stackTail = curr;
-				curr->prev = END_OF_STACK;
 				curr->next = END_OF_STACK;
+				StrategyControl->stackBottom = curr;
 				
-			} else 
+				
+			} else  
 			{
-				StrategyControl->stackHead->prev = curr->node_id;
-				curr->next = StrategyControl->stackHead->node_id;
-				curr->prev = END_OF_STACK;
-				StrategyControl->stackHead = curr;
+				curr->next = StrategyControl->stackTop->node_id;
+				StrategyControl->stackTop->prev = curr->node_id;
+				
 			}
+			// set node as top
+			curr->prev = END_OF_STACK;
+			StrategyControl->stackTop = curr;
+			
 		}
-		else 
+		// c1/c3: node in stack, but not at top, move node to top
+		else if(StrategyControl->stackTop->node_id != buf_id)
 		{
-		
-			if (StrategyControl->stackTail->node_id == buf_id 
-				&& StrategyControl->stackHead->node_id != buf_id)
+			// node at bottom, set prev_node as new bottom
+			if (StrategyControl->stackBottom->node_id == buf_id)
 			{
-				StrategyControl->stackTail = &lruStack[curr->prev];
-				StrategyControl->stackTail->next = END_OF_STACK;
-				StrategyControl->stackHead->prev = curr->node_id;
-				curr->next = StrategyControl->stackHead->node_id;
-				curr->prev = END_OF_STACK;
-				StrategyControl->stackHead = curr;
+				StrategyControl->stackBottom = &lruStack[curr->prev];
+				StrategyControl->stackBottom->next = END_OF_STACK;
 				
-			} else if (StrategyControl->stackHead->node_id != buf_id)
+			} else // node in the middle
 			{
 				BufferNode *next_node = &lruStack[curr->next];
+				next_node->prev = curr->prev;
         			BufferNode *prev_node = &lruStack[curr->prev];
 				prev_node->next = curr->next;
-				next_node->prev = curr->prev;
-				StrategyControl->stackHead->prev = curr->node_id;
-				curr->next = StrategyControl->stackHead->node_id;
-				curr->prev = END_OF_STACK;
-				StrategyControl->stackHead = curr;
 				
 			}
+			// set node as top
+			curr->next = StrategyControl->stackTop->node_id;
+			curr->prev = END_OF_STACK;
+			StrategyControl->stackTop->prev = curr->node_id;
+			StrategyControl->stackTop = curr;
 		
 		}
 	
@@ -437,14 +446,15 @@ StrategyGetBuffer(BufferAccessStrategy strategy, uint32 *buf_state, bool *from_r
 				StrategyAccessBuffer(buf->buf_id, false);
 				*buf_state = local_buf_state;
 				return buf;
-			}
+			} 
 			UnlockBufHdr(buf, local_buf_state);
 		}
 	}
 
 	/* Nothing on the freelist, so run LRU" */
 
-	BufferNode *victim = StrategyControl->stackTail;
+	// Get victim buffer from the tail of list, which means the bottom of the stack.
+	BufferNode *victim = StrategyControl->stackBottom;
 	
 	while(victim != NULL) {
 		buf = GetBufferDescriptor(victim->node_id);
@@ -466,12 +476,17 @@ StrategyGetBuffer(BufferAccessStrategy strategy, uint32 *buf_state, bool *from_r
 			StrategyAccessBuffer(buf->buf_id, false);
 			*buf_state = local_buf_state;
 			return buf;
+		} else if (StrategyControl->stackTop->node_id == buf->buf_id) 
+		{
+			UnlockBufHdr(buf, local_buf_state);
+			break;
 		}
 		
 		UnlockBufHdr(buf, local_buf_state);
 		
 		victim = &lruStack[victim->prev];
         }
+        elog(ERROR, "No unpinned buffer");
 }
 
 /*
@@ -492,7 +507,7 @@ StrategyFreeBuffer(BufferDesc *buf)
 		if (buf->freeNext < 0)
 			StrategyControl->lastFreeBuffer = buf->buf_id;
 		StrategyControl->firstFreeBuffer = buf->buf_id;
-
+		// c4: Buffer is returned to freelist
 		StrategyAccessBuffer(buf->buf_id, true); 
 	}
 
@@ -580,6 +595,7 @@ StrategyShmemSize(void)
 	/* size of the shared replacement strategy control block */
 	size = add_size(size, MAXALIGN(sizeof(BufferStrategyControl)));
 
+	/* size of the lruStack */
 	size = add_size(size, MAXALIGN(mul_size(sizeof(BufferNode), NBuffers)));
 
 	return size;
@@ -634,8 +650,9 @@ StrategyInitialize(bool init)
 		StrategyControl->firstFreeBuffer = 0;
 		StrategyControl->lastFreeBuffer = NBuffers - 1;
 		
-		StrategyControl->stackHead = NULL;
-                StrategyControl->stackTail = NULL;
+		// THe top and bottom pointers of the stack is NULL during initialization.
+		StrategyControl->stackTop = NULL;
+                StrategyControl->stackBottom = NULL;
 
 		/* Initialize the clock sweep pointer */
 		pg_atomic_init_u32(&StrategyControl->nextVictimBuffer, 0);
@@ -652,6 +669,8 @@ StrategyInitialize(bool init)
 	else
 		Assert(!init);
 		
+	// Initialize LRU stack with NBuffers nodes.
+		
 	lruStack = (BufferNode*)ShmemInitStruct(
 		    "LRU stack", NBuffers * sizeof(BufferNode), &stackFound);
 
@@ -659,7 +678,6 @@ StrategyInitialize(bool init)
 		
 		for (int i = 0; i < NBuffers; i++) {
                     BufferNode *new_node = &lruStack[i];
-		        
                     new_node->node_id = i;
                     new_node->prev = NOT_LINKED;
                     new_node->next = NOT_LINKED;
