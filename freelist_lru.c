@@ -212,7 +212,7 @@ void
 StrategyAccessBuffer(int buf_id, bool delete)
 {
 
-	if (buf_id < 0 || buf_id > NBuffers) // check the range of buf_id
+	if (buf_id < 0 || buf_id >= NBuffers) // check the range of buf_id
 	{
 		elog(ERROR, "Invalid buffer index");
 		return;
@@ -439,7 +439,7 @@ StrategyGetBuffer(BufferAccessStrategy strategy, uint32 *buf_state, bool *from_r
 			 * For lru implementation, usage_count is not important or ignored.
 			 */
 			local_buf_state = LockBufHdr(buf);
-			if (BUF_STATE_GET_REFCOUNT(local_buf_state) == 0)//&& BUF_STATE_GET_USAGECOUNT(local_buf_state) == 0)
+			if (BUF_STATE_GET_REFCOUNT(local_buf_state) == 0) //&& BUF_STATE_GET_USAGECOUNT(local_buf_state) == 0)
 			{
 				if (strategy != NULL)
 					AddBufferToRing(strategy, buf);
@@ -451,10 +451,11 @@ StrategyGetBuffer(BufferAccessStrategy strategy, uint32 *buf_state, bool *from_r
 		}
 	}
 
-	/* Nothing on the freelist, so run LRU" */
+	/* Nothing on the freelist, so run LRU */
 
 	// Get victim buffer from the tail of list, which means the bottom of the stack.
 	BufferNode *victim = StrategyControl->stackBottom;
+	int iter = 0;
 	
 	while(victim != NULL) {
 		buf = GetBufferDescriptor(victim->node_id);
@@ -476,9 +477,18 @@ StrategyGetBuffer(BufferAccessStrategy strategy, uint32 *buf_state, bool *from_r
 			StrategyAccessBuffer(buf->buf_id, false);
 			*buf_state = local_buf_state;
 			return buf;
+			
 		} else if (StrategyControl->stackTop->node_id == buf->buf_id) 
 		{
 			UnlockBufHdr(buf, local_buf_state);
+			
+			if (iter < 3)
+			{
+				iter++;
+				victim = StrategyControl->stackBottom;
+			}
+			
+			else 
 			break;
 		}
 		
@@ -612,7 +622,7 @@ void
 StrategyInitialize(bool init)
 {
 	bool		found;
-	bool            stackFound;
+	bool            stack_found;
 
 	/*
 	 * Initialize the shared buffer lookup hashtable.
@@ -672,9 +682,9 @@ StrategyInitialize(bool init)
 	// Initialize LRU stack with NBuffers nodes.
 		
 	lruStack = (BufferNode*)ShmemInitStruct(
-		    "LRU stack", NBuffers * sizeof(BufferNode), &stackFound);
+		    "LRU stack", mul_size(sizeof(BufferNode), NBuffers), &stack_found);
 
-	if (!stackFound) {
+	if (!stack_found) {
 		
 		for (int i = 0; i < NBuffers; i++) {
                     BufferNode *new_node = &lruStack[i];
