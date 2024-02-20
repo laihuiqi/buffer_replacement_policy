@@ -1,0 +1,5 @@
+# test_bufmgr extension
+comment = 'test buffer manager'
+default_version = '1.0'
+module_pathname = '$libdir/test_bufmgr'
+relocatable = true
